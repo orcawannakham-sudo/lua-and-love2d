@@ -3,17 +3,33 @@ set -e
 
 echo "🔥 LÖVE APK compiler setup"
 
-# Check Java
-java -version
+# Interactive Prompts
+read -p "📱 Enter App Name (default: My Love Game): " APP_NAME
+APP_NAME=${APP_NAME:-"My Love Game"}
 
-# Install basic tools only
-sudo apt-get update
-sudo apt-get install -y git zip unzip
+read -p "📦 Enter Package Name (e.g., com.example.mygame): " PKG_NAME
+PKG_NAME=${PKG_NAME:-"com.example.mygame"}
+
+echo ""
+echo "Building '$APP_NAME' [$PKG_NAME]..."
+echo ""
 
 # Download LÖVE Android source if missing
 if [ ! -d love-android ]; then
     echo "📥 Downloading LÖVE Android..."
     git clone --depth 1 --recursive https://github.com/love2d/love-android.git
+fi
+
+# Set Custom App Name and Package Name in Android project
+STRINGS_XML="love-android/app/src/main/res/values/strings.xml"
+APP_GRADLE="love-android/app/build.gradle"
+
+if [ -f "$STRINGS_XML" ]; then
+    sed -i "s/<string name=\"app_name\">.*<\/string>/<string name=\"app_name\">${APP_NAME}<\/string>/" "$STRINGS_XML"
+fi
+
+if [ -f "$APP_GRADLE" ]; then
+    sed -i "s/applicationId \".*\"/applicationId \"${PKG_NAME}\"/" "$APP_GRADLE"
 fi
 
 # Package THIS repository as game.love
@@ -60,7 +76,7 @@ if [ ! -f game.keystore ]; then
         -validity 10000 \
         -storepass android \
         -keypass android \
-        -dname "CN=Game,O=Game,C=US"
+        -dname "CN=${APP_NAME},O=Game,C=US"
 fi
 
 echo "🔏 Signing APK..."
@@ -76,6 +92,8 @@ mv game-signed.apk game.apk
 echo ""
 echo "================================"
 echo "🔥 APK READY!"
-echo "📦 game.apk"
+echo "📱 App: $APP_NAME"
+echo "📦 ID:  $PKG_NAME"
+echo "📦 Output: game.apk"
 echo "================================"
 
