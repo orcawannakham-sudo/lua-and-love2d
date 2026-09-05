@@ -1,42 +1,154 @@
 #!/bin/bash
 set -e
 
-echo "🔥 LÖVE APK compiler setup"
+# =========================
+# OPTIONS
+# =========================
 
-# Interactive Prompts
-read -p "📱 Enter App Name (default: My Love Game): " APP_NAME
+CLEAR_CACHE=false
+
+if [[ "$1" == "-c" || "$1" == "--clear-cache" ]]; then
+    CLEAR_CACHE=true
+fi
+
+# =========================
+# PROMPTS
+# =========================
+
+read -p "📱 App Name [default: My Love Game]: " APP_NAME
 APP_NAME=${APP_NAME:-"My Love Game"}
 
-read -p "📦 Enter Package Name (e.g., com.example.mygame): " PKG_NAME
+read -p "📦 Package Name [default: com.example.mygame]: " PKG_NAME
 PKG_NAME=${PKG_NAME:-"com.example.mygame"}
 
-echo ""
-echo "Building '$APP_NAME' [$PKG_NAME]..."
-echo ""
+if [ "$CLEAR_CACHE" = false ]; then
+    read -p "🧹 Clear Gradle cache before build? (y/N): " WIPE
 
-# Download LÖVE Android source if missing
-if [ ! -d love-android ]; then
-    echo "📥 Downloading LÖVE Android..."
-    git clone --depth 1 --recursive https://github.com/love2d/love-android.git
+    if [[ "$WIPE" =~ ^[Yy]$ ]]; then
+        CLEAR_CACHE=true
+    fi
 fi
 
-# Set Custom App Name and Package Name in Android project
-STRINGS_XML="love-android/app/src/main/res/values/strings.xml"
-APP_GRADLE="love-android/app/build.gradle"
+# =========================
+# CHECK PACKAGE NAME
+# =========================
 
-if [ -f "$STRINGS_XML" ]; then
-    sed -i "s/<string name=\"app_name\">.*<\/string>/<string name=\"app_name\">${APP_NAME}<\/string>/" "$STRINGS_XML"
+if [[ ! "$PKG_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$ ]]; then
+    echo "❌ Invalid package name: $PKG_NAME"
+    echo "Example: com.orca.mygame"
+    exit 1
 fi
 
-if [ -f "$APP_GRADLE" ]; then
-    sed -i "s/applicationId \".*\"/applicationId \"${PKG_NAME}\"/" "$APP_GRADLE"
+echo
+echo "📱 App Name : $APP_NAME"
+echo "📦 Package  : $PKG_NAME"
+echo
+
+# =========================
+# 1. DOWNLOAD LÖVE ANDROID
+# =========================
+
+if [ ! -d "love-android" ]; then
+    echo "📥 Downloading LÖVE Android template..."
+    git clone --depth 1 --recursive \
+        https://github.com/love2d/love-android.git
 fi
 
-# Package THIS repository as game.love
-echo "📦 Packaging game..."
+# =========================
+# 2. CLEAR CACHE
+# =========================
+
+if [ "$CLEAR_CACHE" = true ]; then
+    echo "🧹 Wiping Gradle caches and build directories..."
+
+    rm -rf love-android/app/build
+    rm -rf love-android/.gradle
+    rm -rf ~/.gradle/caches/transforms-*
+
+    cd love-android
+
+    ./gradlew --stop &>/dev/null || true
+    ./gradlew clean --quiet || true
+
+    cd ..
+fi
+
+# =========================
+# 3. UPDATE MANIFEST
+# =========================
+
+echo "⚙️ Updating Android manifests..."
+
+find love-android -name "AndroidManifest.xml" -type f | while read -r MANIFEST; do
+
+    # package=""
+    sed -i -E \
+        "s/package=['\"][^'\"]+['\"]/package=\"${PKG_NAME}\"/g" \
+        "$MANIFEST"
+
+    # android:label=""
+    sed -i -E \
+        "s/android:label=['\"][^'\"]+['\"]/android:label=\"${APP_NAME}\"/g" \
+        "$MANIFEST"
+
+done
+
+# =========================
+# 4. UPDATE GRADLE
+# =========================
+
+echo "⚙️ Updating Gradle package..."
+
+find love-android -type f \
+    \( -name "*.gradle" -o -name "*.gradle.kts" \) \
+    | while read -r GRADLE_FILE; do
+
+    # applicationId "old.package"
+    sed -i -E \
+        "s/applicationId[[:space:]]+[\"'][^\"']+[\"']/applicationId \"${PKG_NAME}\"/g" \
+        "$GRADLE_FILE"
+
+    # applicationId = "old.package"
+    sed -i -E \
+        "s/applicationId[[:space:]]*=[[:space:]]*[\"'][^\"']+[\"']/applicationId = \"${PKG_NAME}\"/g" \
+        "$GRADLE_FILE"
+
+    # namespace "old.package"
+    sed -i -E \
+        "s/namespace[[:space:]]+[\"'][^\"']+[\"']/namespace \"${PKG_NAME}\"/g" \
+        "$GRADLE_FILE"
+
+    # namespace = "old.package"
+    sed -i -E \
+        "s/namespace[[:space:]]*=[[:space:]]*[\"'][^\"']+[\"']/namespace = \"${PKG_NAME}\"/g" \
+        "$GRADLE_FILE"
+
+done
+
+# =========================
+# 5. SHOW CONFIG
+# =========================
+
+echo
+echo "🔎 Package configuration:"
+grep -RniE \
+    "applicationId|namespace|package=" \
+    love-android/app/src \
+    love-android/app/*.gradle \
+    love-android/*.gradle \
+    2>/dev/null || true
+
+echo
+
+# =========================
+# 6. CREATE GAME.LOVE
+# =========================
+
+echo "📦 Creating game.love..."
+
 rm -f game.love game.apk game-signed.apk
 
-zip -r game.love . \
+zip -q -r game.love . \
     -x ".git/*" \
     -x "love-android/*" \
     -x "game.love" \
@@ -44,30 +156,54 @@ zip -r game.love . \
     -x "game-signed.apk*" \
     -x "game.keystore"
 
-# Put game into Android project
 mkdir -p love-android/app/src/embed/assets
-cp game.love love-android/app/src/embed/assets/game.love
 
-# Build
+cp game.love \
+    love-android/app/src/embed/assets/game.love
+
+# =========================
+# 7. BUILD APK
+# =========================
+
 echo "🔨 Compiling APK..."
-cd love-android
-chmod +x gradlew
-./gradlew --no-daemon assembleEmbedNoRecordRelease
 
-# Find APK
-APK=$(find app/build/outputs -type f -name "*.apk" | head -n 1)
+cd love-android
+
+chmod +x gradlew
+
+./gradlew \
+    --quiet \
+    --no-daemon \
+    assembleEmbedNoRecordRelease
+
+cd ..
+
+# =========================
+# 8. FIND APK
+# =========================
+
+APK=$(find love-android/app/build/outputs \
+    -type f \
+    -name "*.apk" \
+    | head -n 1)
 
 if [ -z "$APK" ]; then
-    echo "❌ Build finished but APK wasn't found"
+    echo "❌ APK was not created!"
     exit 1
 fi
 
-cd ..
-cp "love-android/$APK" ./game.apk
+cp "$APK" game.apk
 
-# Generate keystore ONLY if it doesn't exist
+echo "📦 APK created: game.apk"
+
+# =========================
+# 9. CREATE KEYSTORE
+# =========================
+
 if [ ! -f game.keystore ]; then
-    echo "🔑 Generating keystore..."
+
+    echo "🔑 Creating release keystore..."
+
     keytool -genkeypair -v \
         -keystore game.keystore \
         -alias game \
@@ -76,11 +212,26 @@ if [ ! -f game.keystore ]; then
         -validity 10000 \
         -storepass android \
         -keypass android \
-        -dname "CN=${APP_NAME},O=Game,C=US"
+        -dname "CN=Game,O=Game,C=US" \
+        &>/dev/null
+
 fi
 
+# =========================
+# 10. SIGN APK
+# =========================
+
 echo "🔏 Signing APK..."
-"$HOME/android-sdk/build-tools/36.0.0/apksigner" sign \
+
+APKSIGNER="$HOME/android-sdk/build-tools/36.0.0/apksigner"
+
+if [ ! -f "$APKSIGNER" ]; then
+    echo "❌ apksigner not found:"
+    echo "$APKSIGNER"
+    exit 1
+fi
+
+"$APKSIGNER" sign \
     --ks game.keystore \
     --ks-pass pass:android \
     --key-pass pass:android \
@@ -89,11 +240,19 @@ echo "🔏 Signing APK..."
 
 mv game-signed.apk game.apk
 
-echo ""
-echo "================================"
-echo "🔥 APK READY!"
-echo "📱 App: $APP_NAME"
-echo "📦 ID:  $PKG_NAME"
-echo "📦 Output: game.apk"
-echo "================================"
+# =========================
+# 11. VERIFY
+# =========================
 
+echo "🔍 Verifying APK..."
+
+"$APKSIGNER" verify --verbose game.apk
+
+echo
+echo "================================"
+echo "✅ BUILD SUCCESS!"
+echo "================================"
+echo "📱 App Name : $APP_NAME"
+echo "📦 Package  : $PKG_NAME"
+echo "📄 APK      : game.apk"
+echo "================================"
