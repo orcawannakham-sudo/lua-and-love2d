@@ -25,15 +25,25 @@ jobs:
         run: |
           sdkmanager "platform-tools" "build-tools;36.0.0"
 
+      - name: Prepare love-android
+        run: |
+          if [ ! -f build/love-android/gradlew ]; then
+            echo "⚠️ gradlew missing"
+            echo "📥 Downloading love-android..."
+
+            rm -rf build/love-android
+
+            git clone https://github.com/love2d/love-android.git build/love-android
+          fi
+
+          chmod +x build/love-android/gradlew
+
+          echo "✅ gradlew found:"
+          ls -l build/love-android/gradlew
+
       - name: Build APK
         run: |
           cd build
-
-          echo "📂 Working directory:"
-          pwd
-
-          echo "📄 Files:"
-          ls -la
 
           appn=$(grep '^appn=' apk-build-deta.txt | cut -d= -f2-)
           pkgn=$(grep '^pkgn=' apk-build-deta.txt | cut -d= -f2-)
