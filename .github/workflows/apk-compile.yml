@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if main.lua changed
+        id: changed
+        run: |
+          if git diff --quiet HEAD^ HEAD -- build/main.lua; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "🟢 build/main.lua did not change"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "🔥 build/main.lua changed"
+          fi
+
+      - name: Read build settings
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          cat build/apk-build-deta.txt
+
+      - name: Build APK
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          appn=$(grep '^appn=' build/apk-build-deta.txt | cut -d= -f2-)
+          pkgn=$(grep '^pkgn=' build/apk-build-deta.txt | cut -d= -f2-)
+
+          echo "📱 App: $appn"
+          echo "📦 Package: $pkgn"
+          echo "🧹 Clean: y"
+
+          chmod +x build/build
+
+          printf '%s\n%s\ny\n' "$appn" "$pkgn" | ./build/build
+
+          if [ ! -f game.apk ]; then
+            echo "❌ game.apk not found!"
+            exit 1
+          fi
+
+          mv game.apk "${appn}.apk"
+
+          echo "✅ Created ${appn}.apk"
+
+      - name: Upload APK
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: APK
+          path: "*.apk"
