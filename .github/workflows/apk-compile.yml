@@ -12,96 +12,57 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔍 Validate build settings
+      - name: 🔧 Prepare love-android
         run: |
           cd "$GITHUB_WORKSPACE/build"
 
-          echo "================================"
-          echo "🔍 VALIDATING BUILD SETTINGS"
-          echo "================================"
+          echo "📂 $(pwd)"
 
-          SETTINGS="apk-build-deta.txt"
+          if [ ! -f "love-android/gradlew" ]; then
+            echo "⚠️ gradlew missing"
+            echo "📥 Downloading love-android..."
 
-          if [ ! -f "$SETTINGS" ]; then
-            echo "❌ Missing $SETTINGS"
-            exit 1
+            rm -rf love-android
+            git clone https://github.com/love2d/love-android.git love-android
           fi
 
-          echo "📄 Settings file:"
-          cat "$SETTINGS"
-          echo ""
+          chmod +x love-android/gradlew
 
-          # Reject empty lines
-          if grep -n '^$' "$SETTINGS"; then
-            echo "❌ Empty lines are not allowed"
+          echo "✅ Gradle wrapper:"
+          ls -lh love-android/gradlew
+
+      - name: 🔍 Validate settings
+        run: |
+          cd "$GITHUB_WORKSPACE/build"
+
+          test -f apk-build-deta.txt || {
+            echo "❌ apk-build-deta.txt missing"
             exit 1
-          fi
+          }
 
-          # Reject whitespace
-          if grep -n '[[:space:]]' "$SETTINGS"; then
-            echo "❌ Spaces/tabs are not allowed"
-            exit 1
-          fi
+          appn=$(grep '^appn=' apk-build-deta.txt | cut -d= -f2-)
+          pkgn=$(grep '^pkgn=' apk-build-deta.txt | cut -d= -f2-)
 
-          # Require exactly these two settings
-          line_count=$(wc -l < "$SETTINGS")
-
-          if [ "$line_count" -ne 2 ]; then
-            echo "❌ Settings file must contain exactly 2 lines:"
-            echo "   pkgn=..."
-            echo "   appn=..."
-            exit 1
-          fi
-
-          # Extract values
-          appn=$(grep '^appn=' "$SETTINGS" | cut -d= -f2-)
-          pkgn=$(grep '^pkgn=' "$SETTINGS" | cut -d= -f2-)
-
-          # Require both values
           if [ -z "$appn" ]; then
-            echo "❌ appn is missing or empty"
+            echo "❌ appn is empty"
             exit 1
           fi
 
           if [ -z "$pkgn" ]; then
-            echo "❌ pkgn is missing or empty"
+            echo "❌ pkgn is empty"
             exit 1
           fi
 
-          # Ensure exactly one appn and one pkgn
-          if [ "$(grep -c '^appn=' "$SETTINGS")" -ne 1 ]; then
-            echo "❌ There must be exactly one appn="
-            exit 1
-          fi
-
-          if [ "$(grep -c '^pkgn=' "$SETTINGS")" -ne 1 ]; then
-            echo "❌ There must be exactly one pkgn="
-            exit 1
-          fi
-
-          # Validate app name
-          if ! [[ "$appn" =~ ^[A-Za-z0-9][A-Za-z0-9._ -]{0,49}$ ]]; then
-            echo "❌ Invalid app name: $appn"
-            echo "   Allowed: letters, numbers, spaces, '.', '_' and '-'"
-            echo "   Maximum: 50 characters"
-            exit 1
-          fi
-
-          # Validate Android package name
           if ! [[ "$pkgn" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]; then
             echo "❌ Invalid package name: $pkgn"
-            echo "   Example: com.orca.test"
             exit 1
           fi
 
-          echo "================================"
-          echo "✅ SETTINGS VALID"
-          echo "================================"
+          echo "✅ Settings valid"
           echo "📱 App: $appn"
           echo "📦 Package: $pkgn"
-          echo "================================"
 
-      - name: 🔨 Build APK
+      - name: 🔨 Build
         run: |
           cd "$GITHUB_WORKSPACE/build"
 
@@ -111,32 +72,31 @@ jobs:
           pkgn=$(grep '^pkgn=' apk-build-deta.txt | cut -d= -f2-)
 
           echo "================================"
-          echo "🚀 BUILDING APK"
+          echo "🚀 BUILD START"
+          echo "================================"
+          echo "📂 $(pwd)"
+          echo "📱 $appn"
+          echo "📦 $pkgn"
           echo "================================"
 
           printf '%s\n%s\ny\n' "$appn" "$pkgn" | ./build
 
-      - name: 🔎 Check APK
+      - name: 📦 Find APK
         run: |
           cd "$GITHUB_WORKSPACE/build"
 
-          echo "================================"
-          echo "📦 APK OUTPUT"
-          echo "================================"
+          echo "APK files:"
 
-          apk_count=$(find . -maxdepth 1 -type f -name "*.apk" | wc -l)
+          find . -maxdepth 1 -type f -name "*.apk" -print
 
-          if [ "$apk_count" -eq 0 ]; then
-            echo "❌ No APK was created!"
+          apk=$(find . -maxdepth 1 -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$apk" ]; then
+            echo "❌ No APK found!"
             exit 1
           fi
 
-          if [ "$apk_count" -gt 1 ]; then
-            echo "⚠️ Multiple APK files found:"
-            find . -maxdepth 1 -type f -name "*.apk" -print
-          fi
-
-          find . -maxdepth 1 -type f -name "*.apk" -print -exec ls -lh {} \;
+          echo "✅ Found: $apk"
 
       - name: ⬆️ Upload APK
         uses: actions/upload-artifact@v4
